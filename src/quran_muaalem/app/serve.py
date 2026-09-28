@@ -197,6 +197,27 @@ def run_phonetic_search(
     return response_results, None
 
 
+def pick_search_result(
+    results: list[SearchResultResponse],
+    sura_idx: int | None,
+    aya_idx: int | None,
+) -> SearchResultResponse:
+    """Best result, preferring one that covers the hinted aya.
+
+    The same phrase can appear in several places (e.g. the end of the basmala
+    and 1:3), so a caller that already knows where the reciter is can pass it.
+    """
+    if sura_idx is not None and aya_idx is not None:
+        for r in results:
+            if (
+                (r.start.sura_idx, r.start.aya_idx)
+                <= (sura_idx, aya_idx)
+                <= (r.end.sura_idx, r.end.aya_idx)
+            ):
+                return r
+    return results[0]
+
+
 def run_phonetization_and_error(
     uthmani_text: str,
     moshaf: MoshafAttributes,
@@ -380,6 +401,8 @@ This endpoint:
 - **phonetic_text**: Direct phonetic text input (alternative to audio)
 - **moshaf**: MoshafAttributes form fields defining recitation rules (see API docs for full list)
 - **error_ratio**: Maximum allowed error ratio for search (0.0-1.0)
+- **sura_idx**, **aya_idx**: Optional hint. When the same text appears in several places,
+  prefer the match that covers this aya.
 
 ## MoshafAttributes (Recitation Rules)
 
@@ -460,6 +483,14 @@ async def correct_recitation(
     ),
     moshaf: MoshafAttributes = Depends(correct_recitation_form_dependency()),
     error_ratio: Annotated[float, Form(ge=0.0, le=1)] = app_settings.error_ratio,
+    sura_idx: Annotated[
+        int | None,
+        Form(ge=1, le=114, description="Optional hint: sura being recited"),
+    ] = None,
+    aya_idx: Annotated[
+        int | None,
+        Form(ge=1, description="Optional hint: aya being recited"),
+    ] = None,
 ):
     if file:
         predicted_phonemes = await call_engine_predict(file)
@@ -488,7 +519,7 @@ async def correct_recitation(
             ).model_dump(),
         )
 
-    best_result = search_results[0]
+    best_result = pick_search_result(search_results, sura_idx, aya_idx)
 
     reference_phonemes, errors = await loop.run_in_executor(
         get_phonetization_executor(),
