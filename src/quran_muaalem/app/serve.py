@@ -168,9 +168,12 @@ async def call_engine_predict(audio_file: UploadFile) -> str:
 
 
 # Ayat searched around a hint, in Quran order (so 1:7 -> 2:1 is covered): the
-# reciter may have gone back a little, or on to the next aya.
+# reciter may have gone back a little, or on past the hint. One breath can cover
+# several short ayat (112:2-4), so the window after the hint grows with the query.
 HINT_AYAT_BEFORE = 2
 HINT_AYAT_AFTER = 1
+HINT_MAX_AYAT_AFTER = 15
+HINT_QUERY_SPAN = 1.5  # reference after the hint >= this x query length
 
 
 @lru_cache(maxsize=1)
@@ -199,12 +202,15 @@ def search_near(
     i = int(np.searchsorted(keys, sura_idx * 1000 + aya_idx))
     if i >= len(keys) or keys[i] != sura_idx * 1000 + aya_idx:
         raise NoPhonemesSearchResult(f"There is no aya {sura_idx}:{aya_idx}")
-    lo = int(starts[max(0, i - HINT_AYAT_BEFORE)])
-    j = i + HINT_AYAT_AFTER + 1
-    hi = int(starts[j]) if j < len(starts) else len(ph_search.index)
     norm_query = ph_search._normalize_query(phonemes)
     if not norm_query:
         raise NoPhonemesSearchResult("No speech recognised")
+    lo = int(starts[max(0, i - HINT_AYAT_BEFORE)])
+    j = i + HINT_AYAT_AFTER + 1
+    need = int(len(norm_query) * HINT_QUERY_SPAN)
+    while j < len(starts) and starts[j] - starts[i] < need and j - i <= HINT_MAX_AYAT_AFTER:
+        j += 1
+    hi = int(starts[j]) if j < len(starts) else len(ph_search.index)
     max_edits = int(len(norm_query) * error_ratio)
     outs = find_near_matches(norm_query, ph_search.ref_ph_norm[lo:hi], max_l_dist=max_edits)
     if not outs:
@@ -446,8 +452,9 @@ This endpoint:
 - **phonetic_text**: Direct phonetic text input (alternative to audio)
 - **moshaf**: MoshafAttributes form fields defining recitation rules (see API docs for full list)
 - **error_ratio**: Maximum allowed error ratio for search (0.0-1.0)
-- **sura_idx**, **aya_idx**: Optional hint. Only the ayat around it (2 before, 1 after)
-  are searched, closest match first. Faster, and repeated phrases elsewhere can't win.
+- **sura_idx**, **aya_idx**: Optional hint. Only the ayat around it are searched (2 before,
+  and after it at least 1 aya and enough to cover the audio), closest match first. Faster,
+  and repeated phrases elsewhere can't win.
 
 ## MoshafAttributes (Recitation Rules)
 

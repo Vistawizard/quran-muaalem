@@ -40,6 +40,13 @@ def test_closest_match_first(ph_search):
     assert (r.start.aya_idx, r.end.aya_idx) == (4, 4)
 
 
+def test_one_breath_over_several_short_ayat(ph_search):
+    # hint lags behind: still on 112:2 while 112:2-4 were recited in one breath
+    q = "".join(phonemes(112, a) for a in (2, 3, 4))
+    r = search_near(ph_search, q, 0.1, 112, 2)[0]
+    assert (r.start.aya_idx, r.end.aya_idx) == (2, 4)
+
+
 def test_unknown_aya_is_no_result(ph_search):
     with pytest.raises(NoPhonemesSearchResult):
         search_near(ph_search, phonemes(1, 1), 0.1, 1, 50)
